@@ -169,10 +169,10 @@ def test_rainbow(args=get_args()):
         torch.save(policy.state_dict(), os.path.join(log_path, "policy.pth"))
 
     def stop_fn(mean_rewards: float) -> bool:
-        if env.spec.reward_threshold:
-            return mean_rewards >= env.spec.reward_threshold
-        if "Pong" in args.task:
-            return mean_rewards >= 20
+        # if env.spec.reward_threshold:
+        #     return mean_rewards >= env.spec.reward_threshold
+        # if "Pong" in args.task:
+        #     return mean_rewards >= 20
         return False
 
     def train_fn(epoch, env_step):
