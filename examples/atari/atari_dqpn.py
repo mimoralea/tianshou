@@ -11,7 +11,7 @@ from atari_wrapper import make_atari_env
 from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, VectorReplayBuffer
-from tianshou.policy import DQNPolicy
+from tianshou.policy import DQPNPolicy
 from tianshou.policy.modelbased.icm import ICMPolicy
 from tianshou.trainer import OffpolicyTrainer
 from tianshou.utils import TensorboardLogger, WandbLogger
@@ -31,6 +31,7 @@ def get_args():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--n-step", type=int, default=3)
     parser.add_argument("--target-update-freq", type=int, default=500)
+    parser.add_argument("--policy-update-freq", type=int, default=1000)
     parser.add_argument("--epoch", type=int, default=100)
     parser.add_argument("--step-per-epoch", type=int, default=100000)
     parser.add_argument("--step-per-collect", type=int, default=10)
@@ -83,7 +84,7 @@ def get_args():
     return parser.parse_args()
 
 
-def test_dqn(args=get_args()):
+def test_dqpn(args=get_args()):
     env, train_envs, test_envs = make_atari_env(
         args.task,
         args.seed,
@@ -104,12 +105,13 @@ def test_dqn(args=get_args()):
     net = DQN(*args.state_shape, args.action_shape, args.device).to(args.device)
     optim = torch.optim.Adam(net.parameters(), lr=args.lr)
     # define policy
-    policy = DQNPolicy(
+    policy = DQPNPolicy(
         net,
         optim,
         args.gamma,
         args.n_step,
         target_update_freq=args.target_update_freq,
+        policy_update_freq=args.policy_update_freq,
     )
     if args.icm_lr_scale > 0:
         feature_net = DQN(*args.state_shape, args.action_shape, args.device, features_only=True)
@@ -150,7 +152,7 @@ def test_dqn(args=get_args()):
 
     # log
     now = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
-    args.algo_name = "dqn_icm" if args.icm_lr_scale > 0 else "dqn"
+    args.algo_name = "dqpn_icm" if args.icm_lr_scale > 0 else "dqpn"
     log_name = os.path.join(args.task, args.algo_name, str(args.seed), now)
     log_path = os.path.join(args.logdir, log_name)
 
@@ -258,4 +260,5 @@ def test_dqn(args=get_args()):
 
 
 if __name__ == "__main__":
-    test_dqn(get_args())
+    test_dqpn(get_args())
+ 

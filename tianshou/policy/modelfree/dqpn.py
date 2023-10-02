@@ -14,7 +14,7 @@ from tianshou.data.types import (
 from tianshou.policy import BasePolicy
 
 
-class DQNPolicy(BasePolicy):
+class DQPNPolicy(BasePolicy):
     """Implementation of Deep Q Network. arXiv:1312.5602.
 
     Implementation of Double Q-Learning. arXiv:1509.06461.
@@ -51,8 +51,10 @@ class DQNPolicy(BasePolicy):
         discount_factor: float = 0.99,
         estimation_step: int = 1,
         target_update_freq: int = 0,
+        policy_update_freq: int = 0,
         reward_normalization: bool = False,
         is_double: bool = True,
+        is_policy: bool = False,
         clip_loss_grad: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -65,32 +67,42 @@ class DQNPolicy(BasePolicy):
         assert estimation_step > 0, "estimation_step should be greater than 0"
         self._n_step = estimation_step
         self._target = target_update_freq > 0
-        self._freq = target_update_freq
+        self._policy = policy_update_freq > 0
+        self._target_freq = target_update_freq
+        self._policy_freq = policy_update_freq
         self._iter = 0
         if self._target:
             self.model_old = deepcopy(self.model)
             self.model_old.eval()
+        if self._policy:
+            self.policy = deepcopy(self.model)
+            self.policy.eval()
         self._rew_norm = reward_normalization
         self._is_double = is_double
+        self._is_policy = is_policy
         self._clip_loss_grad = clip_loss_grad
 
     def set_eps(self, eps: float) -> None:
         """Set the eps for epsilon-greedy exploration."""
         self.eps = eps
 
-    def train(self, mode: bool = True) -> "DQNPolicy":
+    def train(self, mode: bool = True) -> "DQPNPolicy":
         """Set the module in training mode, except for the target network."""
         self.training = mode
         self.model.train(mode)
         return self
 
-    def sync_weight(self) -> None:
+    def sync_target_weight(self) -> None:
         """Synchronize the weight for the target network."""
         self.model_old.load_state_dict(self.model.state_dict())
 
+    def sync_policy_weight(self) -> None:
+        """Synchronize the weight for the target network."""
+        self.policy.load_state_dict(self.model.state_dict())
+
     def _target_q(self, buffer: ReplayBuffer, indices: np.ndarray) -> torch.Tensor:
         batch = buffer[indices]  # batch.obs_next: s_{t+n}
-        result = self(batch, input="obs_next")
+        result = self(batch, model="model", input="obs_next")
         if self._target:
             # target_Q = Q_old(s_, argmax(Q_new(s_, *)))
             target_q = self(batch, model="model_old", input="obs_next").logits
@@ -98,6 +110,9 @@ class DQNPolicy(BasePolicy):
             target_q = result.logits
         if self._is_double:
             return target_q[np.arange(len(result.act)), result.act]
+        # if self._is_policy:
+        #     return target_q[np.arange(len(result.act)), result.act]
+
         # Nature DQN, over estimate
         return target_q.max(dim=1)[0]
 
@@ -134,7 +149,7 @@ class DQNPolicy(BasePolicy):
         self,
         batch: RolloutBatchProtocol,
         state: dict | BatchProtocol | np.ndarray | None = None,
-        model: str = "model",
+        model: str = "policy",
         input: str = "obs",
         **kwargs: Any,
     ) -> ModelOutputBatchProtocol:
@@ -177,11 +192,14 @@ class DQNPolicy(BasePolicy):
         return cast(ModelOutputBatchProtocol, result)
 
     def learn(self, batch: RolloutBatchProtocol, *args: Any, **kwargs: Any) -> dict[str, float]:
-        if self._target and self._iter % self._freq == 0:
-            self.sync_weight()
+        if self._target and self._iter % self._target_freq == 0:
+            self.sync_target_weight()
+        if self._policy and self._iter % self._policy_freq == 0:
+            self.sync_policy_weight()
+
         self.optim.zero_grad()
         weight = batch.pop("weight", 1.0)
-        q = self(batch).logits
+        q = self(batch, model='model').logits
         q = q[np.arange(len(q)), batch.act]
         returns = to_torch_as(batch.returns.flatten(), q)
         td_error = returns - q
