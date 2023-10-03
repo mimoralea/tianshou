@@ -51,15 +51,14 @@ class DQPNPolicy(BasePolicy):
         discount_factor: float = 0.99,
         estimation_step: int = 1,
         target_update_freq: int = 0,
-        policy_update_freq: int = 0,
+        policy_update_freq: int = 1,
         reward_normalization: bool = False,
         is_double: bool = True,
-        is_policy: bool = False,
         clip_loss_grad: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.model = model
+        self.online_model = model
         self.optim = optim
         self.eps = 0.0
         assert 0.0 <= discount_factor <= 1.0, "discount factor should be in [0, 1]"
@@ -67,19 +66,17 @@ class DQPNPolicy(BasePolicy):
         assert estimation_step > 0, "estimation_step should be greater than 0"
         self._n_step = estimation_step
         self._target = target_update_freq > 0
-        self._policy = policy_update_freq > 0
         self._target_freq = target_update_freq
         self._policy_freq = policy_update_freq
         self._iter = 0
         if self._target:
-            self.model_old = deepcopy(self.model)
-            self.model_old.eval()
-        if self._policy:
-            self.policy = deepcopy(self.model)
-            self.policy.eval()
+            self.target_model = deepcopy(self.online_model)
+            self.target_model.eval()
+
+        self.policy_model = deepcopy(self.online_model)
+        self.policy_model.eval()
         self._rew_norm = reward_normalization
         self._is_double = is_double
-        self._is_policy = is_policy
         self._clip_loss_grad = clip_loss_grad
 
     def set_eps(self, eps: float) -> None:
@@ -89,30 +86,26 @@ class DQPNPolicy(BasePolicy):
     def train(self, mode: bool = True) -> "DQPNPolicy":
         """Set the module in training mode, except for the target network."""
         self.training = mode
-        self.model.train(mode)
+        self.online_model.train(mode)
         return self
 
-    def sync_target_weight(self) -> None:
+    def sync_weight(self, target_sync=False, policy_sync=False) -> None:
         """Synchronize the weight for the target network."""
-        self.model_old.load_state_dict(self.model.state_dict())
-
-    def sync_policy_weight(self) -> None:
-        """Synchronize the weight for the target network."""
-        self.policy.load_state_dict(self.model.state_dict())
+        if target_sync:
+            self.target_model.load_state_dict(self.online_model.state_dict())
+        if policy_sync:
+            self.policy_model.load_state_dict(self.online_model.state_dict())
 
     def _target_q(self, buffer: ReplayBuffer, indices: np.ndarray) -> torch.Tensor:
         batch = buffer[indices]  # batch.obs_next: s_{t+n}
-        result = self(batch, model="model", input="obs_next")
+        result = self(batch, model="online_model", input="obs_next")
         if self._target:
             # target_Q = Q_old(s_, argmax(Q_new(s_, *)))
-            target_q = self(batch, model="model_old", input="obs_next").logits
+            target_q = self(batch, model="target_model", input="obs_next").logits
         else:
             target_q = result.logits
         if self._is_double:
             return target_q[np.arange(len(result.act)), result.act]
-        # if self._is_policy:
-        #     return target_q[np.arange(len(result.act)), result.act]
-
         # Nature DQN, over estimate
         return target_q.max(dim=1)[0]
 
@@ -149,7 +142,7 @@ class DQPNPolicy(BasePolicy):
         self,
         batch: RolloutBatchProtocol,
         state: dict | BatchProtocol | np.ndarray | None = None,
-        model: str = "policy",
+        model: str = "policy_model",
         input: str = "obs",
         **kwargs: Any,
     ) -> ModelOutputBatchProtocol:
@@ -193,13 +186,13 @@ class DQPNPolicy(BasePolicy):
 
     def learn(self, batch: RolloutBatchProtocol, *args: Any, **kwargs: Any) -> dict[str, float]:
         if self._target and self._iter % self._target_freq == 0:
-            self.sync_target_weight()
-        if self._policy and self._iter % self._policy_freq == 0:
-            self.sync_policy_weight()
+            self.sync_weight(target_sync=True)
+        if self._iter % self._policy_freq == 0:
+            self.sync_weight(policy_sync=True)
 
         self.optim.zero_grad()
         weight = batch.pop("weight", 1.0)
-        q = self(batch, model='model').logits
+        q = self(batch, model='online_model').logits
         q = q[np.arange(len(q)), batch.act]
         returns = to_torch_as(batch.returns.flatten(), q)
         td_error = returns - q
