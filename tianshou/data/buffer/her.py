@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, Union, cast
 
 import numpy as np
 
@@ -15,13 +15,13 @@ class HERReplayBuffer(ReplayBuffer):
     observation is a dictionary with keys ``observation``, ``achieved_goal`` and
     ``desired_goal``. Currently support only HER's future strategy, online sampling.
 
-    :param int size: the size of the replay buffer.
+    :param size: the size of the replay buffer.
     :param compute_reward_fn: a function that takes 2 ``np.array`` arguments,
         ``acheived_goal`` and ``desired_goal``, and returns rewards as ``np.array``.
         The two arguments are of shape (batch_size, ...original_shape) and the returned
         rewards must be of shape (batch_size,).
-    :param int horizon: the maximum number of steps in an episode.
-    :param int future_k: the 'k' parameter introduced in the paper. In short, there
+    :param horizon: the maximum number of steps in an episode.
+    :param future_k: the 'k' parameter introduced in the paper. In short, there
         will be at most k episodes that are re-written for every 1 unaltered episode
         during the sampling.
 
@@ -159,10 +159,12 @@ class HERReplayBuffer(ReplayBuffer):
             future_obs = self[future_t[unique_ep_close_indices]].obs_next
         else:
             future_obs = self[self.next(future_t[unique_ep_close_indices])].obs
+        future_obs = cast(BatchProtocol, future_obs)
 
         # Re-assign goals and rewards via broadcast assignment
         ep_obs.desired_goal[:, her_ep_indices] = future_obs.achieved_goal[None, her_ep_indices]
         if self._save_obs_next:
+            ep_obs_next = cast(BatchProtocol, ep_obs_next)
             ep_obs_next.desired_goal[:, her_ep_indices] = future_obs.achieved_goal[
                 None,
                 her_ep_indices,
@@ -182,7 +184,7 @@ class HERReplayBuffer(ReplayBuffer):
         assert isinstance(self._meta.obs, BatchProtocol)
         self._meta.obs[unique_ep_indices] = ep_obs
         if self._save_obs_next:
-            self._meta.obs_next[unique_ep_indices] = ep_obs_next
+            self._meta.obs_next[unique_ep_indices] = ep_obs_next  # type: ignore
         self._meta.rew[unique_ep_indices] = ep_rew.astype(np.float32)
 
     def _compute_reward(self, obs: BatchProtocol, lead_dims: int = 2) -> np.ndarray:

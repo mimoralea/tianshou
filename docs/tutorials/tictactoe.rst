@@ -1,13 +1,15 @@
-Multi-Agent RL
-==============
+RL against random policy opponent with PettingZoo
+=================================================
 
-Tianshou use `PettingZoo` environment for multi-agent RL training. Here are some helpful tutorial links:
+Tianshou is compatible with `PettingZoo` environments for multi-agent RL, although does not directly provide facilities for multi-agent RL. Here are some helpful tutorial links:
 
 * https://pettingzoo.farama.org/tutorials/tianshou/beginner/
 * https://pettingzoo.farama.org/tutorials/tianshou/intermediate/
 * https://pettingzoo.farama.org/tutorials/tianshou/advanced/
 
-In this section, we describe how to use Tianshou to implement multi-agent reinforcement learning. Specifically, we will design an algorithm to learn how to play `Tic Tac Toe <https://en.wikipedia.org/wiki/Tic-tac-toe>`_ (see the image below) against a random opponent.
+In this section, we describe how to use Tianshou to implement RL in a multi-agent setting where, however, only one agent is trained, and the other one adopts a fixed random policy. 
+The user can then use this as a blueprint to replace the random policy with another trainable agent. 
+Specifically, we will design an algorithm to learn how to play `Tic Tac Toe <https://en.wikipedia.org/wiki/Tic-tac-toe>`_ (see the image below) against a random opponent.
 
 .. image:: ../_static/images/tic-tac-toe.png
     :align: center
@@ -131,7 +133,9 @@ Tianshou already provides some builtin classes for multi-agent learning. You can
     >>> # agents should be wrapped into one policy,
     >>> # which is responsible for calling the acting agent correctly
     >>> # here we use two random agents
-    >>> policy = MultiAgentPolicyManager([RandomPolicy(), RandomPolicy()], env)
+    >>> policy = MultiAgentPolicyManager(
+    >>>     [RandomPolicy(action_space=env.action_space), RandomPolicy(action_space=env.action_space)], env
+    >>> )
     >>>
     >>> # need to vectorize the environment for the collector
     >>> env = DummyVectorEnv([lambda: env])
@@ -174,8 +178,8 @@ Tianshou already provides some builtin classes for multi-agent learning. You can
 Random agents perform badly. In the above game, although agent 2 wins finally, it is clear that a smart agent 1 would place an ``x`` at row 4 col 4 to win directly.
 
 
-Train an MARL Agent
--------------------
+Train one Agent against a random opponent
+-----------------------------------------
 
 So let's start to train our Tic-Tac-Toe agent! First, import some required modules.
 ::
@@ -312,10 +316,11 @@ Here it is:
             if optim is None:
                 optim = torch.optim.Adam(net.parameters(), lr=args.lr)
             agent_learn = DQNPolicy(
-                net,
-                optim,
-                args.gamma,
-                args.n_step,
+                model=net,
+                optim=optim,
+                gamma=args.gamma,
+                action_space=env.action_space,
+                estimate_space=args.n_step,
                 target_update_freq=args.target_update_freq
             )
             if args.resume_path:
@@ -326,7 +331,7 @@ Here it is:
                 agent_opponent = deepcopy(agent_learn)
                 agent_opponent.load_state_dict(torch.load(args.opponent_path))
             else:
-                agent_opponent = RandomPolicy()
+                agent_opponent = RandomPolicy(action_space=env.action_space)
 
         if args.agent_id == 1:
             agents = [agent_learn, agent_opponent]
@@ -642,4 +647,4 @@ Well, although the learned agent plays well against the random agent, it is far 
 
 Next, maybe you can try to build more intelligent agents by letting the agent learn from self-play, just like AlphaZero!
 
-In this tutorial, we show an example of how to use Tianshou for multi-agent RL. Tianshou is a flexible and easy to use RL library. Make the best of Tianshou by yourself!
+In this tutorial, we show an example of how to use Tianshou for training a single agent in a MARL setting. Tianshou is a flexible and easy to use RL library. Make the best of Tianshou by yourself!
